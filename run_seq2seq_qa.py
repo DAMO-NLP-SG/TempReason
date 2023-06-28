@@ -691,9 +691,7 @@ def main():
             formatted_predictions = [{"id": k, "prediction_text": v} for k, v in predictions.items()]
 
         references = [{"id": ex["id"], "answers": ex[answer_column]} for ex in examples]
-        file = 'dev_l3_v2_reason'
-        json.dump(references, open(dlc_dir + 'error_analysis/{}_gt.json'.format(file), 'w'))
-        json.dump(formatted_predictions, open(dlc_dir + 'error_analysis/{}_pred.json'.format(file), 'w'))
+
 
         return EvalPrediction(predictions=formatted_predictions, label_ids=references)
 
