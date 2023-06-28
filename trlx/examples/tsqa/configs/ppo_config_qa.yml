@@ -1,0 +1,60 @@
+train:
+  seq_length: 768
+  epochs: 100
+  total_steps: 100000
+  batch_size: 16
+
+  checkpoint_interval: 5000
+  eval_interval: 500
+  save_best: True
+
+  pipeline: "PromptPipeline"
+  trainer: "AcceleratePPOTrainer"
+
+model:
+  model_path: "/mnt/workspace/project/custom_transformers/examples/pytorch/question-answering/tmp_rev/t5_base_enum_l2_reason/"
+  #model_path: "/mnt/workspace/project/custom_transformers/examples/pytorch/question-answering/t5-base/t5-base/"
+  model_arch_type: "seq2seq"
+  num_layers_unfrozen: 6
+tokenizer:
+  tokenizer_path: "/mnt/workspace/project/custom_transformers/examples/pytorch/question-answering/tmp_rev/t5_base_enum_l2_reason/"
+  padding_side: "right"
+  truncation_side: "right"
+optimizer:
+  name: "adamw"
+  kwargs:
+    lr: 5.0e-6
+    betas: [0.9, 0.999]
+    eps: 1.0e-8
+    weight_decay: 1.0e-6
+
+scheduler:
+  name: "cosine_annealing"
+  kwargs:
+    T_max: 10000
+    eta_min: 1.0e-6
+
+method:
+  name: "ppoconfig"
+  num_rollouts: 256
+  chunk_size: 12
+  ppo_epochs: 4
+  init_kl_coef: 0.05
+  target: 6
+  horizon: 10000
+  gamma: 0.99
+  lam: 0.95
+  cliprange: 0.2
+  cliprange_value: 0.2
+  vf_coef: 1.0
+  scale_reward: None
+  ref_mean: None
+  ref_std: None
+  cliprange_reward: 10
+  gen_kwargs:
+    max_new_tokens: 32
+  gen_experience_kwargs:
+    max_new_tokens: 24
+    do_sample: False
+    num_beams: 4
+    temperature: 1.0
