@@ -8,7 +8,8 @@ git clone https://huggingface.co/datasets/tonytan48/TempReason
 ```
 You may put the data in your desired directory, we suggest putting them under 'data'.
 
-'''bibitex
+
+```bibtex
 @inproceedings{tan-etal-2023-towards,
     title = "Towards Benchmarking and Improving the Temporal Reasoning Capability of Large Language Models",
     author = "Tan, Qingyu  and
@@ -20,4 +21,4 @@ You may put the data in your desired directory, we suggest putting them under 'd
     url = "https://arxiv.org/abs/2306.08952",
 
 }
-'''
+```
