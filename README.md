@@ -19,6 +19,8 @@ Further training with TSRL
 cd trlx
 python examples/tsqa/run_t5_qa.py
 ```
+
+If you find our work useful, please cite our paper as:
 ```bibtex
 @inproceedings{tan-etal-2023-towards,
     title = "Towards Benchmarking and Improving the Temporal Reasoning Capability of Large Language Models",
