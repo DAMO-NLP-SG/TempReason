@@ -8,7 +8,17 @@ git clone https://huggingface.co/datasets/tonytan48/TempReason
 ```
 You may put the data in your desired directory, we suggest putting them under 'data'.
 
+Backbone model Training for T5-SFT
+```
+bash tempreason_train.sh
+```
 
+
+Further training with TSRL 
+```
+cd trlx
+python examples/tsqa/run_t5_qa.py
+```
 ```bibtex
 @inproceedings{tan-etal-2023-towards,
     title = "Towards Benchmarking and Improving the Temporal Reasoning Capability of Large Language Models",
