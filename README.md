@@ -17,7 +17,6 @@ You may put the data in your desired directory, we suggest putting them under 'd
       Bing, Lidong",
     booktitle = "Proceedings of ACL",
     year = "2023",
-    address = "Toronto, Canada",
     url = "https://arxiv.org/abs/2306.08952",
 
 }
