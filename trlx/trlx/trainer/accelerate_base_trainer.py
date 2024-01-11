@@ -316,7 +316,184 @@ class AccelerateRLTrainer(BaseRLTrainer):
     def add_eval_pipeline(self, eval_pipeline):
         """Adds pipeline from with validation prompts"""
         self.eval_pipeline = eval_pipeline
+    def get_prediction(self):  # noqa: C901
+        """Samples model on `eval_prompts`, logs stats with `reward_fn` or `metric_fn` if provided"""
+        logger.info("Evaluating model")
 
+        # Do multiple evaluations over a single list in `gen_kwargs` if present
+        if self.generate_sweep_kwarg is not None:
+            gen_sweep_arg, gen_sweep_values = self.generate_sweep_kwarg
+        else:
+            gen_sweep_values = [None]
+
+        desc = [
+            f"generation sweep 0/{len(gen_sweep_values)}",
+            f"eval batch 0/{len(self.eval_dataloader)}",
+        ]
+        tbar = logging.tqdm(
+            total=len(self.eval_dataloader) * len(gen_sweep_values),
+            desc=f"[{' | '.join(desc)}]",
+            disable=not self.accelerator.is_main_process,
+            position=0,
+            leave=True,
+        )
+
+        stats = {}
+        table = []
+
+        for i_sweep, gen_sweep_value in enumerate(gen_sweep_values):
+            # A dedicated suffix for wandb logging
+            if gen_sweep_value is not None:
+                sweep_suffix = f"@{gen_sweep_arg}={gen_sweep_value}"
+            else:
+                sweep_suffix = ""
+
+            all_samples = []
+            all_prompts = []
+            all_prompt_sizes = []
+            all_metadata = []
+            generate_time = time()
+            for i_prompt, prompts in enumerate(self.eval_dataloader):
+                metadata = {k: v for k, v in prompts.items() if k != "input_ids" and k != "attention_mask"}
+                if self.generate_sweep_kwarg:
+                    samples = self.generate_eval(
+                        prompts["input_ids"], prompts["attention_mask"], **{gen_sweep_arg: gen_sweep_value}
+                    )
+                else:
+                    samples = self.generate_eval(prompts["input_ids"], prompts["attention_mask"])
+
+                # TODO(reciprocated): this should be moved into `decode`
+                # but that needs to be synced with indexing in `make_experience`
+                if self.config.model.model_arch_type == "seq2seq":
+                    samples = samples[:, 1:].contiguous()
+
+                prompt_sizes = torch.tensor(prompts.input_ids.shape[1]).repeat(len(prompts.input_ids))
+                prompts, samples, prompt_sizes = self.accelerator.gather_for_metrics(
+                    self.accelerator.pad_across_processes(
+                        [prompts.input_ids, samples, prompt_sizes.to(samples.device)],
+                        dim=1,
+                        pad_index=self.tokenizer.pad_token_id,
+                    )
+                )
+                all_samples.extend(samples.tolist())
+                all_prompts.extend(prompts.tolist())
+                all_prompt_sizes.extend(prompt_sizes.tolist())
+
+                metadata = gather_dict(metadata, self.accelerator.gradient_state)
+                all_metadata.append(metadata)
+
+                desc = [
+                    f"generation sweep {i_sweep + 1}/{len(gen_sweep_values)}",
+                    f"eval batch {i_prompt + 1}/{len(self.eval_dataloader)}",
+                ]
+                tbar.set_description(f"[{' | '.join(desc)}]")
+                tbar.update()
+            tbar.close()
+
+            stats["time/generate"] = time() - generate_time
+
+            if self.accelerator.is_main_process:
+                str_samples, str_prompts, str_outputs = self.decode(all_prompts, all_samples, all_prompt_sizes)
+
+                columns = ["prompt", "output"]
+                columns_data = [str_prompts, str_outputs]
+
+                metadata, *xs = all_metadata
+                for k in metadata:
+                    for x in xs:
+                        metadata[k].extend(x[k])
+
+                # in online setting, compute the reward for validation
+                if self.reward_fn:
+                    logger.info("Computing rewards")
+                    rewards = torch.tensor(
+                        self.reward_fn(samples=str_samples, prompts=str_prompts, outputs=str_outputs, **metadata),
+                        dtype=float,
+                    )
+                    mean_reward = rewards.mean().item()
+                    columns.append("reward")
+                    if not isinstance(rewards, list):
+                        rewards = rewards.tolist()
+                    columns_data.append(rewards)
+                    stats[f"reward/mean{sweep_suffix}"] = mean_reward
+
+                # additionally log any other metrics
+                if self.metric_fn:
+                    logger.info("Computing metrics")
+                    metric_time = time()
+                    metrics = self.metric_fn(samples=str_samples, prompts=str_prompts, outputs=str_outputs, **metadata)
+                    stats["time/metric"] = time() - metric_time
+
+                    mean_metrics = {
+                        f"metrics/{k}{sweep_suffix}": torch.as_tensor(xs).mean(-1).item() for k, xs in metrics.items()
+                    }
+
+                    stats.update(mean_metrics)
+
+                    for metric, values in metrics.items():
+                        # Skip metrics that are scalers since they represent aggregated values
+                        if isinstance(values, float):
+                            continue
+                        columns.append(metric)
+                        if not isinstance(values, list):
+                            values = values.tolist()
+                        columns_data.append(values)
+
+                # Prepend the sweep argument along with samples
+                if self.generate_sweep_kwarg:
+                    columns.insert(0, gen_sweep_arg)
+                    columns_data.insert(0, [gen_sweep_value] * len(samples))
+
+                table.append(list(zip(*columns_data)))
+
+        # Log and display evaluation metrics
+        logger.info("Summarizing evaluation")
+        if self.accelerator.is_main_process:
+            rows = sum(list(map(list, zip(*table))), [])
+
+            # Add metrics/rewards to the table's title
+            table_title = f"Evaluation #{self.nth_evaluation}"
+            for k, x in stats.items():
+                if k.startswith("reward") or k.startswith("metrics"):
+                    table_title += f" {k}: {significant(x)}"
+
+            rich_table = Table(*columns, title=table_title, show_lines=True)
+            for ix in range(max(min(3, len(rows)), len(gen_sweep_values))):
+                rich_table.add_row(*[str(significant(x)) for x in rows[ix]])
+            Console().print(rich_table)
+
+            if self.config.train.tracker == "wandb":
+                import wandb
+
+                stats["samples"] = wandb.Table(columns, rows)
+
+        self.nth_evaluation += 1
+        return stats, str_outputs
+    
+    def predict(self):  # noqa: C901
+        """
+        Samples batches from `self.store`, updates model and periodically evaluates it on `self.eval_dataloader`
+        """
+        logger.info("Starting training")
+
+        self.prepare_learning()
+        self.iter_count = 0
+        self.nth_evaluation = 0
+
+        if ray.is_initialized():
+            checkpoint = session.get_checkpoint()
+            if checkpoint:
+                with checkpoint.as_directory() as dir:
+                    self.accelerator.load_state(dir)
+
+                    with open(os.path.join(dir, "state.json")) as f:
+                        state = json.load(f)
+                        self.iter_count = state["iter_count"]
+        else:
+            results, predictions = self.get_prediction()
+            self.accelerator.log(results, step=self.iter_count)
+        return results, predictions
+        
     def evaluate(self):  # noqa: C901
         """Samples model on `eval_prompts`, logs stats with `reward_fn` or `metric_fn` if provided"""
         logger.info("Evaluating model")
