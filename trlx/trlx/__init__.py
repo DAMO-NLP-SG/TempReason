@@ -1,2 +1,2 @@
-from .trlx import train
+from .trlx import train, evaluate
 from .utils import logging
