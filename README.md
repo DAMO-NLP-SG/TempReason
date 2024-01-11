@@ -20,10 +20,7 @@ cd trlx
 python examples/tsqa/run_t5_qa.py
 ```
 
-Pretrained Checkpoints
-```
-Accessible in this Google Drive folder: https://drive.google.com/drive/folders/1Pezx__jBraBKLMFqWnDVOQUhMV1eFoLv?usp=sharing
-```
+Pretrained checkpoints are accessible in this Google Drive folder: https://drive.google.com/drive/folders/1Pezx__jBraBKLMFqWnDVOQUhMV1eFoLv?usp=sharing
 
 If you find our work useful, please cite our paper as:
 ```bibtex
